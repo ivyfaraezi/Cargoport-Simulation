@@ -8260,6 +8260,11 @@ void shipAnimation3(int value)
     if (ship_start3 == true)
     {
         moveShip3 += 0.20f;
+        if (!waterSoundPlayed)
+        {
+            playWaterSound();
+            waterSoundPlayed = true;
+        }
         if (moveShip3 > 260)
         {
             moveShip3 = 260;
@@ -8328,6 +8333,7 @@ void playRainSound()
     mciSendString(cmd.c_str(), NULL, 0, NULL);
     mciSendString("play rain", NULL, 0, NULL);
 }
+
 void stopRainSound()
 {
     mciSendString("stop rain", NULL, 0, NULL);
