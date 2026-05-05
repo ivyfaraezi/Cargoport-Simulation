@@ -514,6 +514,7 @@ void design2(float Sx, float Sy, float Tx, float Ty, float An, float Ax, float A
     glPopMatrix();
 }
 
+// Container
 void design3(float Sx, float Sy, float Tx, float Ty, float An, float Ax, float Ay, float Az, int R, int G, int B)
 {
 
@@ -1138,6 +1139,63 @@ void drawDDA_Line(float x1, float y1, float x2, float y2,
     glEnd();
 }
 
+// ============================================================
+// MIDPOINT LINE ALGORITHM
+// ============================================================
+void drawMidpointLine(float x1, float y1, float x2, float y2,
+                      int rC, int gC, int bC)
+{
+    glColor3ub(rC, gC, bC);
+    glBegin(GL_POINTS);
+
+    // Scale to integer pixel space (1 unit = 100 sub-pixels)
+    const float S = 100.0f;
+    int ix1 = (int)(x1 * S);
+    int iy1 = (int)(y1 * S);
+    int ix2 = (int)(x2 * S);
+    int iy2 = (int)(y2 * S);
+
+    int dx = abs(ix2 - ix1);
+    int dy = abs(iy2 - iy1);
+    int sx = (ix1 < ix2) ? 1 : -1;
+    int sy = (iy1 < iy2) ? 1 : -1;
+    int x  = ix1, y = iy1;
+
+    if (dx >= dy)
+    {
+        // Shallow line: step along X
+        int d = 2 * dy - dx;
+        for (int i = 0; i <= dx; i++)
+        {
+            glVertex2f(x / S, y / S);
+            if (d >= 0)
+            {
+                y += sy;
+                d -= 2 * dx;
+            }
+            d += 2 * dy;
+            x += sx;
+        }
+    }
+    else
+    {
+        // Steep line: step along Y
+        int d = 2 * dx - dy;
+        for (int i = 0; i <= dy; i++)
+        {
+            glVertex2f(x / S, y / S);
+            if (d >= 0)
+            {
+                x += sx;
+                d -= 2 * dy;
+            }
+            d += 2 * dx;
+            y += sy;
+        }
+    }
+    glEnd();
+}
+
 void drawDDA_RoadDashes()
 {
     float dashLen = 1.0f;
@@ -1322,14 +1380,16 @@ void drawRain()
     if (!isRaining)
         return;
 
-    glColor3ub(173, 216, 230);
-    glBegin(GL_LINES);
+    // Rain drops drawn using the Midpoint Line algorithm
+    // Each drop is a short diagonal line (slightly angled for realism)
     for (int i = 0; i < numDrops; ++i)
     {
-        glVertex2f(rainX[i], rainY[i]);
-        glVertex2f(rainX[i], rainY[i] - 1.5f);
+        float x1 = rainX[i];
+        float y1 = rainY[i];
+        float x2 = rainX[i] + 0.3f;   // slight rightward angle
+        float y2 = rainY[i] - 1.5f;
+        drawMidpointLine(x1, y1, x2, y2, 173, 216, 230);
     }
-    glEnd();
 }
 
 void drawRain3()
@@ -1337,16 +1397,37 @@ void drawRain3()
     if (!isRaining)
         return;
 
-    glColor3ub(173, 216, 230);
-    glBegin(GL_LINES);
+    // ---------------------------------------------------------------
+    // CLIPPING: use glScissor to restrict rain to the sea area only.
+    // Scene 3 ortho: x=0..32, y=0..18. Sea occupies y=0..11.
+    // Window is 1440x810 (standard), so:
+    //   y_sea_bottom (y=0)  → pixel 0
+    //   y_sea_top    (y=11) → pixel 810*(11/18) = 495
+    // We clip so rain never falls on the sky band (y>11).
+    // ---------------------------------------------------------------
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    int vpW = viewport[2];
+    int vpH = viewport[3];
+
+    // Map ortho y=11 to pixel row
+    int seaTopPx = (int)(vpH * (11.0f / 18.0f));
+
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 0, vpW, seaTopPx);   // allow drawing only below sea/sky horizon
+
+    // Rain drops drawn using the Midpoint Line algorithm
     for (int i = 0; i < numDrops; ++i)
     {
-        float rx = (rainX[i] + 41.0f) * (32.0f / 82.0f);
-        float ry = (rainY[i] + 25.0f) * (18.0f / 55.0f);
-        glVertex2f(rx, ry);
-        glVertex2f(rx, ry - 0.5f);
+        // Remap from scene-2 particle space to scene-3 ortho space
+        float rx  = (rainX[i] + 41.0f) * (32.0f / 82.0f);
+        float ry  = (rainY[i] + 25.0f) * (18.0f / 55.0f);
+        float rx2 = rx + 0.15f;       // slight rightward angle
+        float ry2 = ry - 0.5f;
+        drawMidpointLine(rx, ry, rx2, ry2, 173, 216, 230);
     }
-    glEnd();
+
+    glDisable(GL_SCISSOR_TEST);
 }
 
 // Scene 1: ortho 0..32 x 0..18
@@ -1360,23 +1441,18 @@ void drawRain1()
     if (!isRaining)
         return;
 
-    // scene-2 ranges: x width=82, y height=55
-    // scene-1 ranges: x width=32, y height=18
     const float sx = 32.0f / 82.0f;
     const float sy = 18.0f / 55.0f;
-    const float dropLen = 1.5f * sy; // proportional drop length
 
-    glColor3ub(173, 216, 230);
-    glLineWidth(1.0f);
-    glBegin(GL_LINES);
+    // Rain drops drawn using the Midpoint Line algorithm
     for (int i = 0; i < numDrops; ++i)
     {
-        float rx = (rainX[i] + 41.0f) * sx;
-        float ry = (rainY[i] + 25.0f) * sy;
-        glVertex2f(rx, ry);
-        glVertex2f(rx, ry - dropLen);
+        float rx  = (rainX[i] + 41.0f) * sx;
+        float ry  = (rainY[i] + 25.0f) * sy;
+        float rx2 = rx + 0.1f;        // slight rightward angle
+        float ry2 = ry - 1.5f * sy;
+        drawMidpointLine(rx, ry, rx2, ry2, 173, 216, 230);
     }
-    glEnd();
 }
 
 void sky_1()
@@ -8389,6 +8465,7 @@ void keyboard_raf(unsigned char key, int x, int y)
         break;
 
     case 'r':
+    case 'R':
         if (movecY <= 0.5)
         {
             pick = false;
@@ -8553,8 +8630,8 @@ void showInfoScreen()
     printf("║ ← : Move left  (crane hook block)                           ║\n");
     printf("║ p : Pick container when hook is above it                    ║\n");
     printf("║ r : Release container at ground                             ║\n");
-    printf("║ n : Switch to day scenario                                  ║\n");
-    printf("║ d : Switch to night scenario                                ║\n");
+    printf("║ d : Switch to day scenario                                  ║\n");
+    printf("║ n : Switch to night scenario                                ║\n");
     printf("║ b : Toggle rain effect                                      ║\n");
     printf("║ SpaceBar : Reset the simulation                             ║\n");
     printf("║ ESC : Exit the simulation                                   ║\n");
